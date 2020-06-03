@@ -13,7 +13,6 @@
 #include <assert.h>
 #include <fcntl.h>
 
-
 // Custom-includes
 #include <include/httpserver.hpp>
 #include <include/segtree.hpp>
@@ -59,6 +58,7 @@ time_t started_at;              // When was the server started
 bool opt_show_help = false;     // Was --help requested?
 const char *ac_file = NULL;     // Path to the input file
 int port = 6767;                // The port number on which to start the HTTP server
+const int MAX_RECUR = 3;
 const char *project_homepage_url = "https://github.com/duckduckgo/cpp-libface/";
 
 enum {
@@ -91,6 +91,13 @@ enum { IMPORT_FILE_NOT_FOUND = 1,
        IMPORT_MUNMAP_FAILED  = 2,
        IMPORT_MMAP_FAILED    = 3
 };
+
+struct PartialQuery {
+    std::string new_query;
+    int start_pos;
+};
+
+PartialQuery tokens[MAX_RECUR];
 
 
 struct InputLineParser {
@@ -223,6 +230,33 @@ struct InputLineParser {
 
 };
 
+static void
+seperate_query_string(const std::string query) {
+    int cnt = 0;
+    std::string new_query = query;
+    new_query.erase(query.find_last_not_of(" \n\r\t")+1);
+    int end = new_query.size();
+    for (int i = end - 1; i >= 0; --i) {
+        switch (new_query[i]) {
+            case ' ':
+            case '\t':
+            case '\n':
+            case '\r':
+                if (i != end) {
+                    struct PartialQuery tmp = {new_query.substr(i+1, end - i), i};
+                    tokens[cnt] = tmp;
+                    cnt++;
+                }
+        }
+        if (cnt >= MAX_RECUR) {
+            return;
+        }
+    }
+    for (; cnt < MAX_RECUR; cnt++) {
+        struct PartialQuery tmp = {"", 0};
+        tokens[cnt] = tmp;
+    }
+}
 
 off_t
 file_size(const char *path) {
@@ -680,7 +714,7 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
     headers["Content-Type"] = "application/json; charset=UTF-8"; 
 
     if (q.length() <= 2) {
-        body = "{\"l\": []}";
+        body = "{\"l\":[]}";
         write_response(client, 200, "OK", headers, body);
         return;
     }
@@ -689,12 +723,28 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
     str_lowercase(q);
     vp_t results = suggest(pm, st, q, n);
 
-    /*
-      for (size_t i = 0; i < results.size(); ++i) {
-      mg_printf(conn, "%s:%d\n", results[i].first.c_str(), results[i].second);
-      }
-    */
-    
+    if (results.empty()) {
+        int cnt = MAX_RECUR - 1;
+        seperate_query_string(q);
+        
+        PartialQuery tmp;
+
+        while (results.empty() && cnt >= 0) {
+            if (tokens[cnt].start_pos != 0) {
+                tmp = tokens[cnt];
+                results = suggest(pm, st, tmp.new_query, n);
+            }
+            cnt--;
+        }
+
+        if (!results.empty()) {
+            std::string prefix = q.substr(0, tmp.start_pos+1);
+            for (size_t i = 0; i < results.size(); ++i) {
+                results[i].phrase = prefix + results[i].phrase;
+            }
+        }
+    }
+
     if (has_cb) {
         headers["Content-Type"] = "application/javascript; charset=UTF-8"; 
         body = cb + "(" + results_json(q, results, type) + ");\n";
