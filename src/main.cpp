@@ -468,7 +468,7 @@ uint_to_string(uint_t n, uint_t pad = 0) {
 void
 escape_special_chars(std::string& str) {
     std::string ret;
-    ret.reserve(str.size() + 10);
+    ret.reserve(str.size() + 15);
     for (size_t j = 0; j < str.size(); ++j) {
         switch (str[j]) {
         case '"':
@@ -805,6 +805,7 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
     unsigned mask = get_env(raw_q, suggest_start);
     std::string q = ((unsigned) suggest_start < raw_q.length()) ? raw_q.substr(suggest_start, raw_q.length() - suggest_start) : "";
     std::string p = ((unsigned) suggest_start < raw_q.length()) ? raw_q.substr(0, suggest_start) : raw_q;
+    p += ((p.back() == ')') || ((p.back() == '"' && !(mask & QUOTE_ENV)))) ? " " : "";
     std::string suffix = get_suffix(mask);
 
     q = trim(q);
