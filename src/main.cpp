@@ -92,6 +92,12 @@ enum { IMPORT_FILE_NOT_FOUND = 1,
        IMPORT_MMAP_FAILED    = 3
 };
 
+enum { ONE_WORD_ENV = 1 << 0,
+       PARENTHESIS_ENV = (1 << 1),
+       QUOTE_ENV = 1 << 2,
+       ERROR_CODE = ~0
+};
+
 struct PartialQuery {
     std::string new_query;
     int start_pos;
@@ -227,7 +233,6 @@ struct InputLineParser {
             this->psnippet_proxy->assign(base, len);
         }
     }
-
 };
 
 static void
@@ -256,6 +261,77 @@ seperate_query_string(const std::string query) {
         struct PartialQuery tmp = {"", 0};
         tokens[cnt] = tmp;
     }
+}
+
+static unsigned
+get_env(const std::string query, int& suggest_start) {
+    suggest_start = 0;
+    unsigned mask = 0;
+    int allowed_one_word = 0;
+
+    for (size_t i = 0; i < query.size(); ++i) {
+        switch (query[i]) {
+            // decide whether to limit query to one word
+            case ' ':  // exit one word env
+                allowed_one_word = ONE_WORD_ENV;
+                if ((mask & (ONE_WORD_ENV + PARENTHESIS_ENV)) && (mask < QUOTE_ENV))  // when one word env and not in quote env
+                    suggest_start = i + 1;
+                mask &= ~ONE_WORD_ENV;
+                break;
+
+            case '+':  // enter one word env
+            case '-':
+            case ':':
+                if (mask < (ONE_WORD_ENV << 1) - 1) {
+                    mask ^= allowed_one_word;
+                    suggest_start = i + 1;
+                }
+                break;
+
+            case '"':  // enter/exit quote env
+                mask ^= QUOTE_ENV;
+                suggest_start = i + 1;
+                break;
+
+            case '(':  // enter parenthesis env
+                if ((mask & PARENTHESIS_ENV) && (!(mask & QUOTE_ENV))) {  // we do not allow nested parethesis 
+                    mask = ERROR_CODE;
+                    return mask;
+                }
+                if (mask < (PARENTHESIS_ENV << 1) - 1) {
+                    mask |= PARENTHESIS_ENV;
+                    suggest_start = i + 1;
+                }
+                break;
+
+            case ')':  // exit oarenthesis env
+                if (mask < (PARENTHESIS_ENV << 1)) {
+                    suggest_start = i + 1;
+                    mask &= ~PARENTHESIS_ENV;
+                }
+                break;
+        }
+
+        if (query[i] != ' ') {
+            allowed_one_word = 0;
+        }
+    }
+    return mask;
+}
+
+static std::string
+get_suffix(const unsigned mask) {
+    std::string suffix = "";
+    if (mask == (unsigned) ERROR_CODE) {
+        return suffix;
+    }
+    if (mask & QUOTE_ENV) {
+        suffix += "\"";
+    }
+    if (mask & PARENTHESIS_ENV) {
+        suffix += ")";
+    }
+    return suffix;
 }
 
 off_t
@@ -696,12 +772,12 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
         return;
     }
 
-    std::string q    = unescape_query(url.query["q"]);
+    std::string raw_q    = unescape_query(url.query["q"]);
     std::string sn   = url.query["n"];
     std::string cb   = unescape_query(url.query["callback"]);
     std::string type = unescape_query(url.query["type"]);
 
-    DCERR("handle_suggest::q:"<<q<<", sn:"<<sn<<", callback: "<<cb<<endl);
+    DCERR("handle_suggest::q:"<<raw_q<<", sn:"<<sn<<", callback: "<<cb<<endl);
 
     unsigned int n = sn.empty() ? NMAX : atoi(sn.c_str());
     if (n > NMAX) {
@@ -713,8 +789,18 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
 
     headers["Content-Type"] = "application/json; charset=UTF-8"; 
 
-    if (q.length() <= 2) {
-        body = "{\"l\":[]}";
+    int suggest_start = 0;
+    unsigned mask = get_env(raw_q, suggest_start);
+    std::string q = ((unsigned) suggest_start < raw_q.length()) ? raw_q.substr(suggest_start, raw_q.length() - suggest_start) : "";
+    std::string p = ((unsigned) suggest_start < raw_q.length()) ? raw_q.substr(0, suggest_start) : raw_q;
+    std::string suffix = get_suffix(mask);
+
+    q.erase(q.find_last_not_of(" \n\r\t")+1);
+
+    if ((q.length() <= 2) || (mask == (unsigned) ERROR_CODE)) {
+        body = "{\"l\":[" + 
+            (((mask == (unsigned) ERROR_CODE) || (suffix.empty())) ? "" : raw_q + suffix) +
+            "]}";
         write_response(client, 200, "OK", headers, body);
         return;
     }
@@ -743,6 +829,10 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
                 results[i].phrase = prefix + results[i].phrase;
             }
         }
+    }
+
+    for (size_t i = 0; i < results.size(); ++i) {
+        results[i].phrase = p + results[i].phrase + suffix;
     }
 
     if (has_cb) {
