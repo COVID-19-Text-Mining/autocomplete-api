@@ -807,10 +807,10 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
         n = 1;
     }
 
+    bool one_word = (mask & (PARENTHESIS_ENV + ONE_WORD_ENV)) && (!(mask & (QUOTE_ENV)));
+
     // for single word env, search more
-    if (mask & (PARENTHESIS_ENV + ONE_WORD_ENV)) {
-        n = NMAX;
-    }
+    n = one_word ? NMAX : n;
 
     headers["Content-Type"] = "application/json; charset=UTF-8"; 
 
@@ -826,7 +826,7 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
     str_lowercase(q);
     vp_t results = suggest(pm, st, q, n);
 
-    if (results.empty() && (!(mask & (PARENTHESIS_ENV + ONE_WORD_ENV)))) {
+    if (results.empty() && (!one_word)) {
         int cnt = MAX_RECUR - 1;
         seperate_query_string(q);
         
@@ -846,7 +846,7 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
                 results[i].phrase = prefix + results[i].phrase;
             }
         }
-    } else if (mask & (PARENTHESIS_ENV + ONE_WORD_ENV)) {
+    } else if (one_word) {
         results = filter_single_word(results);
     }
 
