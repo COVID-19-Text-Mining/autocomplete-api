@@ -236,11 +236,20 @@ struct InputLineParser {
     }
 };
 
+std::string
+trim(const std::string& str) {
+    size_t first = str.find_first_not_of(" \n\r\t");
+    if (std::string::npos == first) {
+        return str;
+    }
+    size_t last = str.find_last_not_of(" \n\r\t");
+    return str.substr(first, (last - first + 1));
+}
+
 static void
 seperate_query_string(const std::string query) {
     int cnt = 0;
-    std::string new_query = query;
-    new_query.erase(query.find_last_not_of(" \n\r\t")+1);
+    std::string new_query = trim(query);
     int end = new_query.size();
     for (int i = end - 1; i >= 0; --i) {
         switch (new_query[i]) {
@@ -285,7 +294,7 @@ get_env(const std::string query, int& suggest_start) {
             case ':':
                 if (mask < (ONE_WORD_ENV << 1) - 1) {
                     mask ^= allowed_one_word;
-                    suggest_start = i + 1;
+                    suggest_start = allowed_one_word ? i + 1 : suggest_start;
                 }
                 break;
 
@@ -798,7 +807,7 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
     std::string p = ((unsigned) suggest_start < raw_q.length()) ? raw_q.substr(0, suggest_start) : raw_q;
     std::string suffix = get_suffix(mask);
 
-    q.erase(q.find_last_not_of(" \n\r\t")+1);
+    q = trim(q);
 
     unsigned int n = sn.empty() ? NMAX : atoi(sn.c_str());
     if (n > NMAX) {
@@ -807,7 +816,7 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
         n = 1;
     }
 
-    bool one_word = (mask & (PARENTHESIS_ENV + ONE_WORD_ENV)) && (!(mask & (QUOTE_ENV)));
+    bool one_word = ((mask & (PARENTHESIS_ENV + ONE_WORD_ENV)) && (!(mask & (QUOTE_ENV))));
 
     // for single word env, search more
     n = one_word ? NMAX : n;

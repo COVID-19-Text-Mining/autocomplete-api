@@ -57,5 +57,4 @@ operator<<(std::ostream& out, phrase_t const& p) {
     return out;
 }
 
-
 #endif // LIBFACE_UTILS_HPP
