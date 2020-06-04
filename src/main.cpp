@@ -27,6 +27,7 @@
 #include <string>
 #include <fstream>
 #include <algorithm>
+#include <regex>
 
 #if !defined NMAX
 #define NMAX 16
@@ -58,7 +59,7 @@ time_t started_at;              // When was the server started
 bool opt_show_help = false;     // Was --help requested?
 const char *ac_file = NULL;     // Path to the input file
 int port = 6767;                // The port number on which to start the HTTP server
-const int MAX_RECUR = 3;
+const int MAX_RECUR = 4;
 const char *project_homepage_url = "https://github.com/duckduckgo/cpp-libface/";
 
 enum {
@@ -332,6 +333,18 @@ get_suffix(const unsigned mask) {
         suffix += ")";
     }
     return suffix;
+}
+
+static vp_t
+filter_single_word(vp_t results) {
+    vp_t filtered_results;
+    std::regex txt_regex(" ");
+    for (size_t i = 0; i < results.size(); i++) {
+        if (!std::regex_search(results[i].phrase, txt_regex)) {
+            filtered_results.push_back(results[i]);
+        }
+    }
+    return filtered_results;
 }
 
 off_t
@@ -779,16 +792,6 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
 
     DCERR("handle_suggest::q:"<<raw_q<<", sn:"<<sn<<", callback: "<<cb<<endl);
 
-    unsigned int n = sn.empty() ? NMAX : atoi(sn.c_str());
-    if (n > NMAX) {
-        n = NMAX;
-    }
-    if (n < 1) {
-        n = 1;
-    }
-
-    headers["Content-Type"] = "application/json; charset=UTF-8"; 
-
     int suggest_start = 0;
     unsigned mask = get_env(raw_q, suggest_start);
     std::string q = ((unsigned) suggest_start < raw_q.length()) ? raw_q.substr(suggest_start, raw_q.length() - suggest_start) : "";
@@ -796,6 +799,20 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
     std::string suffix = get_suffix(mask);
 
     q.erase(q.find_last_not_of(" \n\r\t")+1);
+
+    unsigned int n = sn.empty() ? NMAX : atoi(sn.c_str());
+    if (n > NMAX) {
+        n = NMAX;
+    } else if (n < 1) {
+        n = 1;
+    }
+
+    // for single word env, search more
+    if (mask & (PARENTHESIS_ENV + ONE_WORD_ENV)) {
+        n = NMAX;
+    }
+
+    headers["Content-Type"] = "application/json; charset=UTF-8"; 
 
     if ((q.length() <= 2) || (mask == (unsigned) ERROR_CODE)) {
         body = "{\"l\":[" + 
@@ -809,7 +826,7 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
     str_lowercase(q);
     vp_t results = suggest(pm, st, q, n);
 
-    if (results.empty()) {
+    if (results.empty() && (!(mask & (PARENTHESIS_ENV + ONE_WORD_ENV)))) {
         int cnt = MAX_RECUR - 1;
         seperate_query_string(q);
         
@@ -829,6 +846,8 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
                 results[i].phrase = prefix + results[i].phrase;
             }
         }
+    } else if (mask & (PARENTHESIS_ENV + ONE_WORD_ENV)) {
+        results = filter_single_word(results);
     }
 
     for (size_t i = 0; i < results.size(); ++i) {
