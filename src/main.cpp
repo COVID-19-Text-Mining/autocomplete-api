@@ -277,7 +277,7 @@ static unsigned
 get_env(const std::string query, int& suggest_start) {
     suggest_start = 0;
     unsigned mask = 0;
-    int allowed_one_word = 0;
+    int allowed_one_word = ONE_WORD_ENV;
 
     for (size_t i = 0; i < query.size(); ++i) {
         switch (query[i]) {
