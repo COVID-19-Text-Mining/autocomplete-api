@@ -291,10 +291,16 @@ get_env(const std::string query, int& suggest_start) {
 
             case '+':  // enter one word env
             case '-':
+                if (mask < (ONE_WORD_ENV << 1) - 1) {
+                    mask |= allowed_one_word;
+                    suggest_start = allowed_one_word ? i + 1 : suggest_start;
+                }
+                break;
+
             case ':':
                 if (mask < (ONE_WORD_ENV << 1) - 1) {
-                    mask ^= allowed_one_word;
-                    suggest_start = allowed_one_word ? i + 1 : suggest_start;
+                    mask |= ONE_WORD_ENV;
+                    suggest_start = i + 1;
                 }
                 break;
 
