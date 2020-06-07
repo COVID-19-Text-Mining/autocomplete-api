@@ -277,7 +277,7 @@ static unsigned
 get_env(const std::string query, int& suggest_start) {
     suggest_start = 0;
     unsigned mask = 0;
-    int allowed_one_word = ONE_WORD_ENV;
+    unsigned allowed_one_word = ONE_WORD_ENV;
 
     for (size_t i = 0; i < query.size(); ++i) {
         switch (query[i]) {
@@ -432,7 +432,12 @@ unescape_query(std::string const &query) {
     for (size_t i = 0; i < query.size(); ++i) {
         switch (state) {
         case QP_DEFAULT:
-            if (query[i] != '%') {
+            if (query[i] == '@' && 
+                i + 1 < query.size() && 
+                query[i + 1] == '@') {
+                ++i;
+                ret += "+\"";
+            } else if (query[i] != '%') {
                 ret += query[i];
             } else {
                 state = QP_ESCAPED1;
@@ -805,7 +810,7 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
     std::string cb   = unescape_query(url.query["callback"]);
     std::string type = unescape_query(url.query["type"]);
 
-    DCERR("handle_suggest::q:"<<raw_q<<", sn:"<<sn<<", callback: "<<cb<<endl);
+    DCERR("handle_suggest::q:"<<raw_q<<", sn:"<<sn<<", callback: "<<cb<<std::endl);
 
     int suggest_start = 0;
     unsigned mask = get_env(raw_q, suggest_start);
@@ -831,9 +836,13 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
     headers["Content-Type"] = "application/json; charset=UTF-8"; 
 
     if ((q.length() <= 2) || (mask == (unsigned) ERROR_CODE)) {
-        body = "{\"l\":[" + 
-            (((mask == (unsigned) ERROR_CODE) || (suffix.empty())) ? "" : raw_q + suffix) +
-            "]}";
+        body = "{\"l\":[";
+        if (!((mask == (unsigned) ERROR_CODE) || (suffix.empty()))) {
+            escape_special_chars(raw_q);
+            escape_special_chars(suffix);
+            body += "\"" + raw_q + suffix + "\"";
+        }
+        body += "]}";
         write_response(client, 200, "OK", headers, body);
         return;
     }
